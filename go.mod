@@ -1,4 +1,4 @@
-module automobile-app/gateway
+module techtorque/gateway
 
 go 1.25
 

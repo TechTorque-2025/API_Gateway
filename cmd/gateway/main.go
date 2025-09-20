@@ -12,10 +12,37 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-// This is the same secret key we defined in the Java application.properties
-var jwtSecret = []byte("ThisIsASecretKeyForOurAutomobileApplicationThatIsVeryLongAndSecure12345")
+var jwtSecret = []byte("YourSuperSecretKeyForJWTGoesHereAndItMustBeVeryLongForSecurityPurposes")
 
+// --- NEW HELPER FUNCTION FOR CREATING PROXIES ---
+// This function creates a reverse proxy that also strips a given prefix from the request path.
+func newProxy(targetUrl string, prefixToStrip string) (*httputil.ReverseProxy, error) {
+	target, err := url.Parse(targetUrl)
+	if err != nil {
+		return nil, err
+	}
+
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	
+	// The Director is a function that modifies the request before it's sent.
+	// This is where we will do our path rewriting.
+	originalDirector := proxy.Director
+	proxy.Director = func(req *http.Request) {
+		// First, run the original director to set up the host, scheme, etc.
+		originalDirector(req)
+		
+		// Now, rewrite the path.
+		req.URL.Path = strings.TrimPrefix(req.URL.Path, prefixToStrip)
+		log.Printf("Forwarding request to: %s", req.URL.Path)
+	}
+
+	return proxy, nil
+}
+
+
+// The authMiddleware function remains exactly the same as before.
 func authMiddleware(next http.Handler) http.Handler {
+    // ... (no changes here) ...
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Executing auth middleware for %s", r.URL.Path)
 
@@ -32,11 +59,7 @@ func authMiddleware(next http.Handler) http.Handler {
 		}
 
 		tokenString := headerParts[1]
-
-		// --- REAL JWT VALIDATION ---
-		// Parse the token with our secret key.
 		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-			// Don't forget to validate the alg is what you expect:
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 			}
@@ -50,8 +73,7 @@ func authMiddleware(next http.Handler) http.Handler {
 		}
 
 		if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-			// The token is valid! Log the user and proceed.
-			log.Printf("Token is valid for user: %v", claims["sub"]) // "sub" is the standard claim for subject (username)
+			log.Printf("Token is valid for user: %v", claims["sub"])
 			next.ServeHTTP(w, r)
 		} else {
 			http.Error(w, "Invalid Token", http.StatusUnauthorized)
@@ -61,34 +83,23 @@ func authMiddleware(next http.Handler) http.Handler {
 }
 
 func main() {
-	// --- Define ALL Backend Service URLs ---
-	authServiceURL, _ := url.Parse("http://localhost:8081")
-	appointmentServiceURL, _ := url.Parse("http://localhost:8082")
-	serviceMgmtURL, _ := url.Parse("http://localhost:8083")
-	notificationURL, _ := url.Parse("http://localhost:8084")
-	aiChatbotURL, _ := url.Parse("http://localhost:3000")
-
-	// --- Create a Reverse Proxy for EACH service ---
-	authProxy := httputil.NewSingleHostReverseProxy(authServiceURL)
-	appointmentProxy := httputil.NewSingleHostReverseProxy(appointmentServiceURL)
-	serviceMgmtProxy := httputil.NewSingleHostReverseProxy(serviceMgmtURL)
-	notificationProxy := httputil.NewSingleHostReverseProxy(notificationURL)
-	aiChatbotProxy := httputil.NewSingleHostReverseProxy(aiChatbotURL)
+	// --- Create Reverse Proxies using our NEW helper function ---
+	authProxy, _ := newProxy("http://localhost:8081", "/api/v1/auth")
+	appointmentProxy, _ := newProxy("http://localhost:8082", "/api/v1/appointments")
+	serviceMgmtProxy, _ := newProxy("http://localhost:8083", "/api/v1/services")
+	notificationProxy, _ := newProxy("http://localhost:8084", "/api/v1/ws")
+	aiChatbotProxy, _ := newProxy("http://localhost:3000", "/api/v1/ai")
 
 	router := http.NewServeMux()
 
-	// --- Define Public (Unprotected) Routes ---
+	// --- Routing rules remain the same, but the proxies are now smarter ---
 	router.Handle("/api/v1/auth/", authProxy)
-
-	// --- Define Private (Protected) Routes using our middleware ---
-	// Your architecture diagram routes: /appointment, /service, /ws, /ai
-	// We'll use RESTful names: /appointments, /services, /ws, /ai
 	router.Handle("/api/v1/appointments/", authMiddleware(appointmentProxy))
 	router.Handle("/api/v1/services/", authMiddleware(serviceMgmtProxy))
 	router.Handle("/api/v1/ws/", authMiddleware(notificationProxy))
 	router.Handle("/api/v1/ai/", authMiddleware(aiChatbotProxy))
 
-	log.Println("API Gateway listening on http://localhost:8080")
+	log.Println("API Gateway (with path rewriting) listening on http://localhost:8080")
 	if err := http.ListenAndServe(":8080", router); err != nil {
 		log.Fatal(err)
 	}
