@@ -1,0 +1,37 @@
+# Binaries for programs and plugins
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test binary, build artifacts
+*.test
+*.out
+
+# Coverage and tool output
+coverage.out
+
+# Dependency directories
+vendor/
+
+# Go workspace
+go.work
+
+# Editor directories
+.idea/
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment files
+.env
+
+# Logs
+*.log
+
+# JetBrains
+workspace.xml
+
+# Keep go.mod and source files tracked (do not ignore go.mod/go.sum)
