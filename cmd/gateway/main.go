@@ -32,44 +32,50 @@ type ServiceConfig struct {
 	PrefixToStrip string
 }
 
+// --- HELPER FUNCTION to get environment variables with fallback ---
+
+// getEnv retrieves an environment variable or returns a fallback value.
+// It also logs a warning if the fallback is used.
+func getEnv(key, fallback string) string {
+	if value, exists := os.LookupEnv(key); exists {
+		return value
+	}
+	log.Printf("WARNING: Environment variable %s not set. Using fallback value: %s", key, fallback)
+	return fallback
+}
+
 // --- MODIFIED loadConfig FUNCTION ---
 
-// loadConfig loads the configuration, checking for an environment variable for the
-// JWT secret and using a hardcoded value as a fallback for development.
+// loadConfig loads the configuration, checking for environment variables for the
+// JWT secret and service URLs, using hardcoded values as fallbacks.
 func loadConfig() (*Config, error) {
 	// Attempt to get the JWT secret from the environment variable.
-	jwtSecret := os.Getenv("JWT_SECRET")
+	jwtSecret := getEnv("JWT_SECRET", "YourSuperSecretKeyForJWTGoesHereAndItMustBeVeryLongForSecurityPurposes")
 
-	// If the environment variable is not set, use the fallback and log a warning.
-	if jwtSecret == "" {
-		jwtSecret = "YourSuperSecretKeyForJWTGoesHereAndItMustBeVeryLongForSecurityPurposes"
-		log.Println("WARNING: JWT_SECRET environment variable not set. Using insecure fallback key. DO NOT use this in production.")
-	}
-
-	// Service configurations remain the same.
+	// Service configurations with environment variable fallbacks.
 	services := map[string]ServiceConfig{
 		"/api/v1/auth/": {
-			URL:           "http://localhost:8081",
+			URL:           getEnv("AUTH_SERVICE_URL", "http://localhost:8081"),
 			AuthRequired:  false,
 			PrefixToStrip: "/api/v1/auth",
 		},
 		"/api/v1/appointments/": {
-			URL:           "http://localhost:8082",
+			URL:           getEnv("APPOINTMENTS_SERVICE_URL", "http://localhost:8082"),
 			AuthRequired:  true,
 			PrefixToStrip: "/api/v1/appointments",
 		},
 		"/api/v1/services/": {
-			URL:           "http://localhost:8083",
+			URL:           getEnv("SERVICES_SERVICE_URL", "http://localhost:8083"),
 			AuthRequired:  true,
 			PrefixToStrip: "/api/v1/services",
 		},
 		"/api/v1/ws/": {
-			URL:           "http://localhost:8084",
+			URL:           getEnv("WS_SERVICE_URL", "http://localhost:8084"),
 			AuthRequired:  true,
 			PrefixToStrip: "/api/v1/ws",
 		},
 		"/api/v1/ai/": {
-			URL:           "http://localhost:3000",
+			URL:           getEnv("AI_SERVICE_URL", "http://localhost:3000"),
 			AuthRequired:  true,
 			PrefixToStrip: "/api/v1/ai",
 		},
