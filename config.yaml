@@ -1,0 +1,41 @@
+server:
+  port: ":8080"
+
+jwt_secret: "YourSuperSecretKeyForJWTGoesHereAndItMustBeVeryLongForSecurityPurposes"
+
+services:
+  - name: "auth"
+    path_prefix: "/api/v1/auth/"
+    target_url: "http://localhost:8081"
+    strip_prefix: "/api/v1/auth"
+    auth_required: false
+
+  - name: "users"
+    path_prefix: "/api/v1/users/"
+    target_url: "http://localhost:8081" # Also points to the auth service
+    strip_prefix: "/api/v1/users"       # Strips the /api/v1/users prefix
+    auth_required: true                 # All user management actions require auth
+
+  - name: "appointments"
+    path_prefix: "/api/v1/appointments/"
+    target_url: "http://localhost:8082"
+    strip_prefix: "/api/v1/appointments"
+    auth_required: true
+
+  - name: "services"
+    path_prefix: "/api/v1/services/"
+    target_url: "http://localhost:8083"
+    strip_prefix: "/api/v1/services"
+    auth_required: true
+
+  - name: "websocket"
+    path_prefix: "/api/v1/ws/"
+    target_url: "http://localhost:8084"
+    strip_prefix: "/api/v1/ws"
+    auth_required: true
+
+  - name: "ai"
+    path_prefix: "/api/v1/ai/"
+    target_url: "http://localhost:3000"
+    strip_prefix: "/api/v1/ai"
+    auth_required: true

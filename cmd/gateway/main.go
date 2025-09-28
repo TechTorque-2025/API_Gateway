@@ -1,10 +1,9 @@
-// cmd/gateway/main.go
 package main
 
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -14,83 +13,73 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/rs/cors"
+	"gopkg.in/yaml.v3"
 )
 
-// --- Structs for configuration remain the same ---
-
-// Config holds the configuration for the gateway.
+// --- Configuration Structs ---
 type Config struct {
-	JWTSecret string
-	Services  map[string]ServiceConfig
+	Server    ServerConfig    `yaml:"server"`
+	JWTSecret string          `yaml:"jwt_secret"`
+	Services  []ServiceConfig `yaml:"services"`
 }
 
-// ServiceConfig defines the configuration for a backend service.
+type ServerConfig struct {
+	Port string `yaml:"port"`
+}
+
 type ServiceConfig struct {
-	URL           string
-	AuthRequired  bool
-	PrefixToStrip string
+	Name         string `yaml:"name"`
+	PathPrefix   string `yaml:"path_prefix"`
+	TargetURL    string `yaml:"target_url"`
+	StripPrefix  string `yaml:"strip_prefix"`
+	AuthRequired bool   `yaml:"auth_required"`
 }
 
-// --- HELPER FUNCTION to get environment variables with fallback ---
+// --- Global Logger ---
+var logger *slog.Logger
 
-// getEnv retrieves an environment variable or returns a fallback value.
-// It also logs a warning if the fallback is used.
-func getEnv(key, fallback string) string {
-	if value, exists := os.LookupEnv(key); exists {
-		return value
-	}
-	log.Printf("WARNING: Environment variable %s not set. Using fallback value: %s", key, fallback)
-	return fallback
-}
-
-// --- MODIFIED loadConfig FUNCTION ---
-
-// loadConfig loads the configuration, checking for environment variables for the
-// JWT secret and service URLs, using hardcoded values as fallbacks.
-func loadConfig() (*Config, error) {
-	// Attempt to get the JWT secret from the environment variable.
-	jwtSecret := getEnv("JWT_SECRET", "YourSuperSecretKeyForJWTGoesHereAndItMustBeVeryLongForSecurityPurposes")
-
-	// Service configurations with environment variable fallbacks.
-	services := map[string]ServiceConfig{
-		"/api/v1/auth/": {
-			URL:           getEnv("AUTH_SERVICE_URL", "http://localhost:8081"),
-			AuthRequired:  false,
-			PrefixToStrip: "/api/v1/auth",
-		},
-		"/api/v1/appointments/": {
-			URL:           getEnv("APPOINTMENTS_SERVICE_URL", "http://localhost:8082"),
-			AuthRequired:  true,
-			PrefixToStrip: "/api/v1/appointments",
-		},
-		"/api/v1/services/": {
-			URL:           getEnv("SERVICES_SERVICE_URL", "http://localhost:8083"),
-			AuthRequired:  true,
-			PrefixToStrip: "/api/v1/services",
-		},
-		"/api/v1/ws/": {
-			URL:           getEnv("WS_SERVICE_URL", "http://localhost:8084"),
-			AuthRequired:  true,
-			PrefixToStrip: "/api/v1/ws",
-		},
-		"/api/v1/ai/": {
-			URL:           getEnv("AI_SERVICE_URL", "http://localhost:3000"),
-			AuthRequired:  true,
-			PrefixToStrip: "/api/v1/ai",
-		},
+// --- Configuration Loading ---
+func loadConfig(path string) (*Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 
-	return &Config{
-		JWTSecret: jwtSecret,
-		Services:  services,
-	}, nil
+	var config Config
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal config yaml: %w", err)
+	}
+
+	// Override with environment variables
+	if secret := os.Getenv("JWT_SECRET"); secret != "" {
+		config.JWTSecret = secret
+	}
+
+	serviceURLEnvMap := map[string]string{
+		"auth":         "AUTH_SERVICE_URL",
+		"appointments": "APPOINTMENTS_SERVICE_URL",
+		"services":     "SERVICES_SERVICE_URL",
+		"websocket":    "WS_SERVICE_URL",
+		"ai":           "AI_SERVICE_URL",
+	}
+
+	for i := range config.Services {
+		if envVar, ok := serviceURLEnvMap[config.Services[i].Name]; ok {
+			if url := os.Getenv(envVar); url != "" {
+				config.Services[i].TargetURL = url
+			}
+		}
+	}
+
+	return &config, nil
 }
 
-// --- The rest of the functions (newProxy, authMiddleware, main) are unchanged ---
-
-// newProxy creates a new reverse proxy with path stripping.
-func newProxy(targetURL string, prefixToStrip string) (*httputil.ReverseProxy, error) {
+// --- Reverse Proxy ---
+func newProxy(targetURL, stripPrefix string) (*httputil.ReverseProxy, error) {
 	target, err := url.Parse(targetURL)
 	if err != nil {
 		return nil, fmt.Errorf("invalid target URL: %w", err)
@@ -100,19 +89,36 @@ func newProxy(targetURL string, prefixToStrip string) (*httputil.ReverseProxy, e
 	originalDirector := proxy.Director
 	proxy.Director = func(req *http.Request) {
 		originalDirector(req)
-		req.URL.Path = strings.TrimPrefix(req.URL.Path, prefixToStrip)
-		log.Printf("Forwarding request to: %s", req.URL.String())
+		// This is crucial: set the Host header to the target's host
+		req.Host = target.Host
+
+		// Strip the prefix
+		if stripPrefix != "" {
+			req.URL.Path = strings.TrimPrefix(req.URL.Path, stripPrefix)
+		}
+	}
+
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		logger.Info("response received from downstream",
+			"service", targetURL,
+			"status", resp.Status,
+			"request_path", resp.Request.URL.Path,
+		)
+		return nil
 	}
 
 	return proxy, nil
 }
 
-// authMiddleware creates a middleware to validate JWT tokens.
+// Context key for storing user claims
+type contextKey string
+
+const userClaimsKey contextKey = "userClaims"
+
+// --- Authentication Middleware ---
 func authMiddleware(jwtSecret []byte) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			log.Printf("Executing auth middleware for %s", r.URL.Path)
-
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {
 				http.Error(w, "Missing Authorization Header", http.StatusUnauthorized)
@@ -133,14 +139,15 @@ func authMiddleware(jwtSecret []byte) func(http.Handler) http.Handler {
 			})
 
 			if err != nil {
-				log.Printf("Error parsing token: %v", err)
+				logger.Warn("Error parsing token", "error", err)
 				http.Error(w, "Invalid Token", http.StatusUnauthorized)
 				return
 			}
 
 			if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-				log.Printf("Token is valid for user: %v", claims["sub"])
-				next.ServeHTTP(w, r)
+				// ADD CLAIMS TO CONTEXT for later use
+				ctx := context.WithValue(r.Context(), userClaimsKey, claims)
+				next.ServeHTTP(w, r.WithContext(ctx))
 			} else {
 				http.Error(w, "Invalid Token", http.StatusUnauthorized)
 			}
@@ -148,53 +155,114 @@ func authMiddleware(jwtSecret []byte) func(http.Handler) http.Handler {
 	}
 }
 
+// --- Director Modifier Middleware ---
+// This middleware injects user information into the request headers before proxying
+func injectUserInfo(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if claims, ok := r.Context().Value(userClaimsKey).(jwt.MapClaims); ok {
+			// Extract user info and add to headers for downstream services
+			if sub, exists := claims["sub"]; exists {
+				r.Header.Set("X-User-Subject", fmt.Sprintf("%v", sub))
+			}
+			if roles, exists := claims["roles"]; exists {
+				// Assuming roles is a string or can be converted to one
+				r.Header.Set("X-User-Roles", fmt.Sprintf("%v", roles))
+			}
+			logger.Info("Injecting user info into headers", "subject", r.Header.Get("X-User-Subject"))
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func main() {
-	config, err := loadConfig()
+	// --- Structured Logging Setup ---
+	logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	slog.SetDefault(logger)
+
+	// --- Load Configuration ---
+	config, err := loadConfig("config.yaml")
 	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
+		logger.Error("Failed to load configuration", "error", err)
+		os.Exit(1)
 	}
 
-	router := http.NewServeMux()
+	// --- Router and Middleware Setup ---
+	router := chi.NewRouter()
+
+	// A good base middleware stack
+	router.Use(middleware.RequestID)
+	router.Use(middleware.RealIP)
+	router.Use(middleware.Logger) // Chi's structured logger
+	router.Use(middleware.Recoverer)
+
+	// CORS Configuration
+	router.Use(cors.New(cors.Options{
+		AllowedOrigins:   []string{"http://localhost:3000"}, // Your Next.js app's origin
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
+		ExposedHeaders:   []string{"Link"},
+		AllowCredentials: true,
+		MaxAge:           300, // Maximum value not ignored by any major browsers
+	}).Handler)
+
+	// Health Check Endpoint
+	router.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	})
+
+	// --- Service Routing ---
 	authMW := authMiddleware([]byte(config.JWTSecret))
 
-	for path, serviceConfig := range config.Services {
-		proxy, err := newProxy(serviceConfig.URL, serviceConfig.PrefixToStrip)
+	for _, service := range config.Services {
+		proxy, err := newProxy(service.TargetURL, service.StripPrefix)
 		if err != nil {
-			log.Fatalf("Failed to create proxy for %s: %v", path, err)
+			logger.Error("Failed to create proxy", "service", service.Name, "error", err)
+			os.Exit(1)
 		}
 
-		var handler http.Handler = proxy
-		if serviceConfig.AuthRequired {
-			handler = authMW(proxy)
-		}
-		router.Handle(path, handler)
+		// Use a scoped variable for the handler to avoid closure issues
+		handler := http.Handler(proxy)
+
+		router.Group(func(r chi.Router) {
+			if service.AuthRequired {
+				r.Use(authMW)
+				r.Use(injectUserInfo) // Inject user info ONLY for authenticated routes
+			}
+			// The "/*" is important for chi to match sub-paths
+			r.Handle(service.PathPrefix+"*", handler)
+		})
+
+		logger.Info("Registered service", "name", service.Name, "prefix", service.PathPrefix, "target", service.TargetURL)
 	}
 
+	// --- Server Start and Graceful Shutdown ---
 	server := &http.Server{
-		Addr:    ":8080",
+		Addr:    config.Server.Port,
 		Handler: router,
 	}
 
-	// Graceful shutdown
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
-		log.Println("API Gateway listening on http://localhost:8080")
+		logger.Info("API Gateway listening", "address", server.Addr)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Could not listen on %s: %v\n", server.Addr, err)
+			logger.Error("Could not listen on address", "address", server.Addr, "error", err)
+			os.Exit(1)
 		}
 	}()
 
 	<-stop
-	log.Println("Shutting down server...")
+	logger.Info("Shutting down server...")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	if err := server.Shutdown(ctx); err != nil {
-		log.Fatalf("Server forced to shutdown: %v", err)
+		logger.Error("Server forced to shutdown", "error", err)
+		os.Exit(1)
 	}
 
-	log.Println("Server exiting")
+	logger.Info("Server exiting")
 }
