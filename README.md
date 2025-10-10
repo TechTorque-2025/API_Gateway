@@ -1,5 +1,7 @@
 # 🌐 API Gateway
 
+[![Build and Test API Gateway](https://github.com/TechTorque-2025/API_Gateway/actions/workflows/buildtest.yaml/badge.svg)](https://github.com/TechTorque-2025/API_Gateway/actions/workflows/buildtest.yaml)
+
 This service is the single entry point for all client requests in the TechTorque 2025 system. It is responsible for routing, authentication, rate limiting, and enriching requests.
 
 ### 🎯 Key Responsibilities
