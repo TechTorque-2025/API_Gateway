@@ -20,7 +20,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// --- Configuration Structs ---
+// Config --- Configuration Structs ---
 type Config struct {
 	Server    ServerConfig    `yaml:"server"`
 	JWTSecret string          `yaml:"jwt_secret"`
@@ -59,10 +59,19 @@ func loadConfig(path string) (*Config, error) {
 		config.JWTSecret = secret
 	}
 
+	// It maps the 'name' from config.yaml to the environment variable name
+	// from docker-compose.yml.
 	serviceURLEnvMap := map[string]string{
 		"auth":         "AUTH_SERVICE_URL",
+		"users":        "AUTH_SERVICE_URL", // "users" also points to the auth service
+		"vehicles":     "VEHICLE_SERVICE_URL",
 		"appointments": "APPOINTMENTS_SERVICE_URL",
-		"services":     "SERVICES_SERVICE_URL",
+		"services":     "PROJECT_SERVICE_URL", // As defined in docker-compose, this is the project service
+		"projects":     "PROJECT_SERVICE_URL", // "projects" also points to this service
+		"time-logs":    "TIME_LOGGING_SERVICE_URL",
+		"payments":     "PAYMENT_SERVICE_URL",
+		"invoices":     "PAYMENT_SERVICE_URL", // "invoices" also points to this service
+		"admin":        "ADMIN_SERVICE_URL",
 		"websocket":    "WS_SERVICE_URL",
 		"ai":           "AI_SERVICE_URL",
 	}
@@ -89,10 +98,7 @@ func newProxy(targetURL, stripPrefix string) (*httputil.ReverseProxy, error) {
 	originalDirector := proxy.Director
 	proxy.Director = func(req *http.Request) {
 		originalDirector(req)
-		// This is crucial: set the Host header to the target's host
 		req.Host = target.Host
-
-		// Strip the prefix
 		if stripPrefix != "" {
 			req.URL.Path = strings.TrimPrefix(req.URL.Path, stripPrefix)
 		}
@@ -145,7 +151,6 @@ func authMiddleware(jwtSecret []byte) func(http.Handler) http.Handler {
 			}
 
 			if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-				// ADD CLAIMS TO CONTEXT for later use
 				ctx := context.WithValue(r.Context(), userClaimsKey, claims)
 				next.ServeHTTP(w, r.WithContext(ctx))
 			} else {
@@ -156,62 +161,61 @@ func authMiddleware(jwtSecret []byte) func(http.Handler) http.Handler {
 }
 
 // --- Director Modifier Middleware ---
-// This middleware injects user information into the request headers before proxying
 func injectUserInfo(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if claims, ok := r.Context().Value(userClaimsKey).(jwt.MapClaims); ok {
-			// Extract user info and add to headers for downstream services
 			if sub, exists := claims["sub"]; exists {
 				r.Header.Set("X-User-Subject", fmt.Sprintf("%v", sub))
 			}
 			if roles, exists := claims["roles"]; exists {
-				// Assuming roles is a string or can be converted to one
-				r.Header.Set("X-User-Roles", fmt.Sprintf("%v", roles))
+				// The roles claim from the Java JWT is likely a []interface{}.
+				// We need to convert it to a comma-separated string.
+				roleSlice, ok := roles.([]interface{})
+				if ok {
+					var roleStrings []string
+					for _, role := range roleSlice {
+						roleStrings = append(roleStrings, fmt.Sprintf("%v", role))
+					}
+					r.Header.Set("X-User-Roles", strings.Join(roleStrings, ","))
+				}
 			}
-			logger.Info("Injecting user info into headers", "subject", r.Header.Get("X-User-Subject"))
+			logger.Info("Injecting user info into headers", "subject", r.Header.Get("X-User-Subject"), "roles", r.Header.Get("X-User-Roles"))
 		}
 		next.ServeHTTP(w, r)
 	})
 }
 
 func main() {
-	// --- Structured Logging Setup ---
 	logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
 
-	// --- Load Configuration ---
 	config, err := loadConfig("config.yaml")
 	if err != nil {
 		logger.Error("Failed to load configuration", "error", err)
 		os.Exit(1)
 	}
 
-	// --- Router and Middleware Setup ---
 	router := chi.NewRouter()
 
-	// A good base middleware stack
 	router.Use(middleware.RequestID)
 	router.Use(middleware.RealIP)
-	router.Use(middleware.Logger) // Chi's structured logger
+	router.Use(middleware.Logger)
 	router.Use(middleware.Recoverer)
 
-	// CORS Configuration
 	router.Use(cors.New(cors.Options{
-		AllowedOrigins:   []string{"http://localhost:3000"}, // Your Next.js app's origin
-		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedOrigins:   []string{"http://localhost:3000"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
 		ExposedHeaders:   []string{"Link"},
 		AllowCredentials: true,
-		MaxAge:           300, // Maximum value not ignored by any major browsers
+		MaxAge:           300,
 	}).Handler)
 
-	// Health Check Endpoint
 	router.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	})
 
-	// --- Service Routing ---
 	authMW := authMiddleware([]byte(config.JWTSecret))
 
 	for _, service := range config.Services {
@@ -221,22 +225,19 @@ func main() {
 			os.Exit(1)
 		}
 
-		// Use a scoped variable for the handler to avoid closure issues
 		handler := http.Handler(proxy)
 
 		router.Group(func(r chi.Router) {
 			if service.AuthRequired {
 				r.Use(authMW)
-				r.Use(injectUserInfo) // Inject user info ONLY for authenticated routes
+				r.Use(injectUserInfo)
 			}
-			// The "/*" is important for chi to match sub-paths
 			r.Handle(service.PathPrefix+"*", handler)
 		})
 
 		logger.Info("Registered service", "name", service.Name, "prefix", service.PathPrefix, "target", service.TargetURL)
 	}
 
-	// --- Server Start and Graceful Shutdown ---
 	server := &http.Server{
 		Addr:    config.Server.Port,
 		Handler: router,
