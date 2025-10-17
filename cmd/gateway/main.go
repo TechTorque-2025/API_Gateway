@@ -78,8 +78,9 @@ func loadConfig(path string) (*Config, error) {
 
 	for i := range config.Services {
 		if envVar, ok := serviceURLEnvMap[config.Services[i].Name]; ok {
-			if url := os.Getenv(envVar); url != "" {
-				config.Services[i].TargetURL = url
+			// avoid shadowing the imported "url" package by naming the env var value envURL
+			if envURL := os.Getenv(envVar); envURL != "" {
+				config.Services[i].TargetURL = envURL
 			}
 		}
 	}
@@ -102,6 +103,12 @@ func newProxy(targetURL, stripPrefix string) (*httputil.ReverseProxy, error) {
 		if stripPrefix != "" {
 			req.URL.Path = strings.TrimPrefix(req.URL.Path, stripPrefix)
 		}
+		logger.Info("proxying request",
+			"method", req.Method,
+			"original_path", req.URL.Path,
+			"target_host", target.Host,
+			"headers", req.Header,
+		)
 	}
 
 	proxy.ModifyResponse = func(resp *http.Response) error {
@@ -111,6 +118,16 @@ func newProxy(targetURL, stripPrefix string) (*httputil.ReverseProxy, error) {
 			"request_path", resp.Request.URL.Path,
 		)
 		return nil
+	}
+
+	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		logger.Error("proxy error",
+			"target", targetURL,
+			"error", err,
+			"path", r.URL.Path,
+			"method", r.Method,
+		)
+		http.Error(w, "Bad Gateway: "+err.Error(), http.StatusBadGateway)
 	}
 
 	return proxy, nil
@@ -213,7 +230,9 @@ func main() {
 
 	router.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+		if _, err := w.Write([]byte("OK")); err != nil {
+			logger.Warn("Failed to write health response", "error", err)
+		}
 	})
 
 	authMW := authMiddleware([]byte(config.JWTSecret))
@@ -227,13 +246,20 @@ func main() {
 
 		handler := http.Handler(proxy)
 
-		router.Group(func(r chi.Router) {
-			if service.AuthRequired {
+		// Create a sub-router for each service with proper authentication
+		pathPrefix := strings.TrimSuffix(service.PathPrefix, "/")
+
+		if service.AuthRequired {
+			router.Group(func(r chi.Router) {
 				r.Use(authMW)
 				r.Use(injectUserInfo)
-			}
-			r.Handle(service.PathPrefix+"*", handler)
-		})
+				r.Handle(pathPrefix+"/*", handler)
+				r.Handle(pathPrefix, handler)
+			})
+		} else {
+			router.Handle(pathPrefix+"/*", handler)
+			router.Handle(pathPrefix, handler)
+		}
 
 		logger.Info("Registered service", "name", service.Name, "prefix", service.PathPrefix, "target", service.TargetURL)
 	}
