@@ -73,15 +73,29 @@ services:
     strip_prefix: "/api/v1"
     auth_required: true
 
-  # --- Bonus Features (For Later Implementation) ---
+  # --- WebSocket Service (Port 8089) - Real-Time Updates ---
   - name: "websocket"
-    path_prefix: "/ws/" # Websocket connections might not use the /api/v1 prefix
-    target_url: "http://localhost:8088" # Assuming a future port for this service
-    strip_prefix: "/ws"
-    auth_required: true # The connection itself needs an auth token
+    path_prefix: "/ws"
+    target_url: "http://localhost:8089"
+    strip_prefix: ""
+    auth_required: false # WebSocket handles auth differently
 
-  - name: "ai"
-    path_prefix: "/api/v1/ai/"
-    target_url: "http://localhost:8089" # Assuming a future port for the FastAPI service
-    strip_prefix: "/api/v1/ai"
+  - name: "websocket-api"
+    path_prefix: "/api/v1/notifications"
+    target_url: "http://localhost:8089"
+    strip_prefix: "/api/v1"
+    auth_required: true
+
+  # --- Notification Service (Port 8090) - Email & In-App Notifications ---
+  - name: "notifications"
+    path_prefix: "/api/v1/notify"
+    target_url: "http://localhost:8090"
+    strip_prefix: "/api/v1"
+    auth_required: true
+
+  # --- AI Chatbot Service (Port 8091) - Bonus Feature ---
+  - name: "ai-chatbot"
+    path_prefix: "/api/v1/chatbot"
+    target_url: "http://localhost:8091"
+    strip_prefix: "/api/v1/chatbot"
     auth_required: true
