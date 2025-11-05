@@ -12,12 +12,14 @@ services:
     target_url: "http://localhost:8081"
     strip_prefix: "/api/v1/auth"
     auth_required: false # Login/Register must be public
+    env_var: "AUTH_SERVICE_URL"
 
   - name: "users"
     path_prefix: "/api/v1/users/"
     target_url: "http://localhost:8081" # Also points to the auth service
     strip_prefix: "/api/v1/users"
     auth_required: true
+    env_var: "AUTH_SERVICE_URL" # Shares the same backend as auth
 
   # --- Vehicle Service (Port 8082) ---
   - name: "vehicles"
@@ -25,6 +27,7 @@ services:
     target_url: "http://localhost:8082"
     strip_prefix: "/api/v1/vehicles"
     auth_required: true
+    # env_var not specified - will auto-generate: VEHICLES_SERVICE_URL
 
   # --- Appointment & Scheduling Service (Port 8083) ---
   - name: "appointments"
@@ -32,6 +35,7 @@ services:
     target_url: "http://localhost:8083"
     strip_prefix: "/api/v1/appointments"
     auth_required: true
+    # env_var not specified - will auto-generate: APPOINTMENTS_SERVICE_URL
 
   # --- Service & Project Management Service (Port 8084) ---
   - name: "services"
@@ -39,12 +43,14 @@ services:
     target_url: "http://localhost:8084"
     strip_prefix: "/api/v1/services"
     auth_required: true
+    env_var: "PROJECT_SERVICE_URL" # Points to project service
 
   - name: "projects"
     path_prefix: "/api/v1/projects/"
     target_url: "http://localhost:8084" # Also points to the project service
     strip_prefix: "/api/v1/projects"
     auth_required: true
+    env_var: "PROJECT_SERVICE_URL" # Shares the same backend
 
   # --- Time Logging Service (Port 8085) ---
   - name: "time-logs"
@@ -52,6 +58,7 @@ services:
     target_url: "http://localhost:8085"
     strip_prefix: "/api/v1/time-logs"
     auth_required: true
+    # env_var not specified - will auto-generate: TIME_LOGS_SERVICE_URL
 
   # --- Payment & Billing Service (Port 8086) ---
   - name: "payments"
@@ -59,12 +66,14 @@ services:
     target_url: "http://localhost:8086"
     strip_prefix: "/api/v1/payments"
     auth_required: true
+    env_var: "PAYMENT_SERVICE_URL"
 
   - name: "invoices"
     path_prefix: "/api/v1/invoices/"
     target_url: "http://localhost:8086" # Also points to the payment service
     strip_prefix: "/api/v1/invoices"
     auth_required: true
+    env_var: "PAYMENT_SERVICE_URL" # Shares the same backend
 
   # --- Admin & Reporting Service (Port 8087) ---
   - name: "admin"
@@ -72,6 +81,15 @@ services:
     target_url: "http://localhost:8087"
     strip_prefix: "/api/v1/admin"
     auth_required: true
+    # env_var not specified - will auto-generate: ADMIN_SERVICE_URL
+
+  # --- Notification Service (Port 8088) ---
+  - name: "notifications"
+    path_prefix: "/api/v1/notifications/"
+    target_url: "http://localhost:8088"
+    strip_prefix: "/api/v1/notifications"
+    auth_required: true
+    # env_var not specified - will auto-generate: NOTIFICATIONS_SERVICE_URL
 
   # --- Bonus Features (For Later Implementation) ---
   - name: "websocket"

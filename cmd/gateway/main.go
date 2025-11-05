@@ -37,6 +37,7 @@ type ServiceConfig struct {
 	TargetURL    string `yaml:"target_url"`
 	StripPrefix  string `yaml:"strip_prefix"`
 	AuthRequired bool   `yaml:"auth_required"`
+	EnvVar       string `yaml:"env_var"` // Optional: custom environment variable name
 }
 
 // --- Global Logger ---
@@ -59,28 +60,28 @@ func loadConfig(path string) (*Config, error) {
 		config.JWTSecret = secret
 	}
 
-	// It maps the 'name' from config.yaml to the environment variable name
-	// from docker-compose.yml.
-	serviceURLEnvMap := map[string]string{
-		"auth":         "AUTH_SERVICE_URL",
-		"users":        "AUTH_SERVICE_URL", // "users" also points to the auth service
-		"vehicles":     "VEHICLE_SERVICE_URL",
-		"appointments": "APPOINTMENTS_SERVICE_URL",
-		"services":     "PROJECT_SERVICE_URL", // As defined in docker-compose, this is the project service
-		"projects":     "PROJECT_SERVICE_URL", // "projects" also points to this service
-		"time-logs":    "TIME_LOGGING_SERVICE_URL",
-		"payments":     "PAYMENT_SERVICE_URL",
-		"invoices":     "PAYMENT_SERVICE_URL", // "invoices" also points to this service
-		"admin":        "ADMIN_SERVICE_URL",
-		"websocket":    "WS_SERVICE_URL",
-		"ai":           "AI_SERVICE_URL",
-	}
-
+	// Override service URLs from environment variables
+	// If env_var is specified in config, use it; otherwise generate from service name
 	for i := range config.Services {
-		if envVar, ok := serviceURLEnvMap[config.Services[i].Name]; ok {
-			if url := os.Getenv(envVar); url != "" {
-				config.Services[i].TargetURL = url
-			}
+		var envVarName string
+
+		// Use custom env_var if specified, otherwise auto-generate
+		if config.Services[i].EnvVar != "" {
+			envVarName = config.Services[i].EnvVar
+		} else {
+			// Auto-generate: convert "service-name" to "SERVICE_NAME_SERVICE_URL"
+			// e.g., "time-logs" -> "TIME_LOGS_SERVICE_URL"
+			normalizedName := strings.ToUpper(strings.ReplaceAll(config.Services[i].Name, "-", "_"))
+			envVarName = normalizedName + "_SERVICE_URL"
+		}
+
+		// Override target URL if environment variable is set
+		if envURL := os.Getenv(envVarName); envURL != "" {
+			config.Services[i].TargetURL = envURL
+			logger.Info("Service URL overridden from environment",
+				"service", config.Services[i].Name,
+				"env_var", envVarName,
+				"url", envURL)
 		}
 	}
 
