@@ -8,86 +8,94 @@ jwt_secret: "YourSuperSecretKeyForJWTGoesHereAndItMustBeVeryLongForSecurityPurpo
 services:
   # --- Authentication Service (Port 8081) ---
   - name: "auth"
-    path_prefix: "/api/v1/auth/"
+    path_prefix: "/api/v1/auth"
     target_url: "http://localhost:8081"
     strip_prefix: "/api/v1/auth"
     auth_required: false # Login/Register must be public
     env_var: "AUTH_SERVICE_URL"
 
   - name: "users"
-    path_prefix: "/api/v1/users/"
+    path_prefix: "/api/v1/users"
     target_url: "http://localhost:8081" # Also points to the auth service
-    strip_prefix: "/api/v1/users"
+    strip_prefix: "/api/v1"
     auth_required: true
     env_var: "AUTH_SERVICE_URL" # Shares the same backend as auth
 
   # --- Vehicle Service (Port 8082) ---
   - name: "vehicles"
-    path_prefix: "/api/v1/vehicles/"
+    path_prefix: "/api/v1/vehicles"
     target_url: "http://localhost:8082"
-    strip_prefix: "/api/v1/vehicles"
+    strip_prefix: "/api/v1"
     auth_required: true
     # env_var not specified - will auto-generate: VEHICLES_SERVICE_URL
 
   # --- Appointment & Scheduling Service (Port 8083) ---
-  - name: "appointments"
-    path_prefix: "/api/v1/appointments/"
+  # Public availability check (no authentication required)
+  - name: "appointments-availability"
+    path_prefix: "/api/v1/appointments/availability"
     target_url: "http://localhost:8083"
-    strip_prefix: "/api/v1/appointments"
+    strip_prefix: "/api/v1"
+    auth_required: false # Public endpoint
+    
+  # Protected appointment endpoints
+  - name: "appointments"
+    path_prefix: "/api/v1/appointments"
+    target_url: "http://localhost:8083"
+    strip_prefix: "/api/v1"
     auth_required: true
     # env_var not specified - will auto-generate: APPOINTMENTS_SERVICE_URL
 
   # --- Service & Project Management Service (Port 8084) ---
   - name: "services"
-    path_prefix: "/api/v1/services/"
+    path_prefix: "/api/v1/services"
     target_url: "http://localhost:8084"
-    strip_prefix: "/api/v1/services"
+    strip_prefix: "/api/v1"
     auth_required: true
     env_var: "PROJECT_SERVICE_URL" # Points to project service
 
   - name: "projects"
-    path_prefix: "/api/v1/projects/"
+    path_prefix: "/api/v1/projects"
     target_url: "http://localhost:8084" # Also points to the project service
-    strip_prefix: "/api/v1/projects"
+    strip_prefix: "/api/v1"
     auth_required: true
     env_var: "PROJECT_SERVICE_URL" # Shares the same backend
 
   # --- Time Logging Service (Port 8085) ---
   - name: "time-logs"
-    path_prefix: "/api/v1/time-logs/"
+    path_prefix: "/api/v1/time-logs"
     target_url: "http://localhost:8085"
-    strip_prefix: "/api/v1/time-logs"
+    strip_prefix: "/api/v1"
     auth_required: true
     # env_var not specified - will auto-generate: TIME_LOGS_SERVICE_URL
 
   # --- Payment & Billing Service (Port 8086) ---
   - name: "payments"
-    path_prefix: "/api/v1/payments/"
+    path_prefix: "/api/v1/payments"
     target_url: "http://localhost:8086"
-    strip_prefix: "/api/v1/payments"
+    strip_prefix: "/api/v1"
     auth_required: true
     env_var: "PAYMENT_SERVICE_URL"
 
   - name: "invoices"
-    path_prefix: "/api/v1/invoices/"
+    path_prefix: "/api/v1/invoices"
     target_url: "http://localhost:8086" # Also points to the payment service
-    strip_prefix: "/api/v1/invoices"
+    strip_prefix: "/api/v1"
     auth_required: true
     env_var: "PAYMENT_SERVICE_URL" # Shares the same backend
 
   # --- Admin & Reporting Service (Port 8087) ---
   - name: "admin"
-    path_prefix: "/api/v1/admin/"
+    path_prefix: "/api/v1/admin"
     target_url: "http://localhost:8087"
-    strip_prefix: "/api/v1/admin"
+    strip_prefix: "/api/v1"
     auth_required: true
     # env_var not specified - will auto-generate: ADMIN_SERVICE_URL
 
   # --- Notification Service (Port 8088) ---
   - name: "notifications"
-    path_prefix: "/api/v1/notifications/"
+    path_prefix: "/api/v1/notifications"
     target_url: "http://localhost:8088"
-    strip_prefix: "/api/v1/notifications"
+    strip_prefix: "/api/v1"
     auth_required: true
     # env_var not specified - will auto-generate: NOTIFICATIONS_SERVICE_URL
 
