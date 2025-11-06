@@ -83,19 +83,19 @@ services:
   - name: "websocket-api"
     path_prefix: "/api/v1/notifications"
     target_url: "http://localhost:8089"
-    strip_prefix: "/api/v1"
-    auth_required: true
+    strip_prefix: "" # Don't strip - service expects full path
+    auth_required: false # Health endpoint needs to be public
 
   # --- Notification Service (Port 8090) - Email & In-App Notifications ---
   - name: "notifications"
     path_prefix: "/api/v1/notify"
     target_url: "http://localhost:8090"
-    strip_prefix: "/api/v1"
+    strip_prefix: "" # Don't strip - service expects full path
     auth_required: true
 
   # --- AI Chatbot Service (Port 8091) - Bonus Feature ---
   - name: "ai-chatbot"
     path_prefix: "/api/v1/chatbot"
     target_url: "http://localhost:8091"
-    strip_prefix: "/api/v1/chatbot"
-    auth_required: true
+    strip_prefix: "" # Don't strip - chatbot expects full path
+    auth_required: false # Chatbot handles its own auth
