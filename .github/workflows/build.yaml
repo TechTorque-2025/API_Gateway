@@ -1,0 +1,108 @@
+# API_Gateway/.github/workflows/build.yml
+# This workflow builds, tests, AND packages the Go API Gateway
+
+name: Build, Test, and Package Gateway
+
+on:
+  push:
+    branches:
+      - 'main'
+      - 'devOps'
+      - 'dev'
+  pull_request:
+    branches:
+      - 'main'
+      - 'devOps'
+      - 'dev'
+
+permissions:
+  contents: read
+  packages: write 
+
+jobs:
+  # --- JOB 1: Build and Test (From your file) ---
+  # This runs on all pushes AND all pull requests to verify the code
+  build-and-test:
+    name: Build and Smoke Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: go.mod
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build Go Application
+        run: go build -v -o ./app ./cmd/gateway
+
+      - name: Verify config.yaml exists
+        run: |
+          if [ ! -f config.yaml ]; then
+            echo "Error: config.yaml not found!"
+            exit 1
+          fi
+          echo "✓ config.yaml found"
+
+      - name: Start Gateway (smoke test)
+        run: |
+          echo "Starting API Gateway with config.yaml..."
+          # We need to set a dummy secret for the smoke test
+          export JWT_SECRET="dummy-secret-for-test"
+          timeout 5s ./app || code=$?
+          if [ ${code:-0} -eq 124 ]; then
+            echo "✓ Gateway started successfully (terminated after 5s)"
+            exit 0
+          elif [ ${code:-0} -eq 0 ]; then
+            echo "✓ Gateway started and stopped cleanly"
+            exit 0
+          else
+            echo "✗ Gateway failed to start (exit code: ${code})"
+            exit 1
+          fi
+
+  # --- JOB 2: Package as Docker Image (From my file) ---
+  # This runs ONLY after Job 1 succeeds, AND
+  # This runs ONLY on pushes to your main branches (not PRs)
+  build-and-push-docker:
+    name: Build & Push Docker Image
+    needs: build-and-test # Depends on the first job
+    
+    # This logic ensures it only runs on pushes, not PRs
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/devOps' || github.ref == 'refs/heads/dev')
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }} 
+          tags: |
+            type=sha,prefix=
+            type:raw,value=latest,enable={{is_default_branch}}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
