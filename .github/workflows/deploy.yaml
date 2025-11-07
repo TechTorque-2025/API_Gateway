@@ -7,57 +7,54 @@ on:
     # This MUST match the 'name:' of your build.yml file
     workflows: ["Build, Test, and Package Gateway"]
     types:
-      - completed # Run only after the build workflow finishes
+      - completed
     branches:
-      - 'main'   # Deploy on main
-      - 'devOps' # Deploy on devOps
-      # Note: We are not deploying the 'dev' branch, as requested
+      - 'main'
+      - 'devOps'
 
 jobs:
   deploy:
     name: Deploy Gateway to Kubernetes
-    # We only deploy if the build job was successful
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
 
     steps:
-      # Checks out the code so we can access the K8s files
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      # Finds the 7-character commit SHA that triggered the build
       - name: Get Commit SHA
         id: get_sha
         run: |
           echo "sha=$(echo ${{ github.event.workflow_run.head_sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
 
-      # Installs kubectl
+      # 1. Checkout your new 'k8s-config' repository
+      - name: Checkout K8s Config Repo
+        uses: actions/checkout@v4
+        with:
+          # This points to your new repo
+          repository: 'TechTorque-2025/k8s-config' 
+          # This uses the org-level secret you created
+          token: ${{ secrets.REPO_ACCESS_TOKEN }} 
+          # We'll put the code in a directory named 'config-repo'
+          path: 'config-repo' 
+
       - name: Install kubectl
         uses: azure/setup-kubectl@v3
 
-      # Installs yq, the tool we use to safely edit YAML
       - name: Install yq
         run: |
           sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
           sudo chmod +x /usr/bin/yq
 
-      # Logs into your Azure VM's K3s cluster
       - name: Set Kubernetes context
         uses: azure/k8s-set-context@v4
         with:
-          # This uses the Org-level secret you created
-          kubeconfig: ${{ secrets.KUBE_CONFIG_DATA }} 
+          kubeconfig: ${{ secrets.KUBE_CONFIG_DATA }} # This uses your Org-level secret
 
-      # This is the magic step!
-      # It replaces the image tag in your K8s file with the new one
+      # 2. Update the image tag in the checked-out config repo
       - name: Update image tag in YAML
         run: |
-          yq -i '.spec.template.spec.containers[0].image = "ghcr.io/techtorque-2025/api_gateway:${{ steps.get_sha.outputs.sha }}"' Kubernetes/services/gateway-deployment.yaml
+          yq -i '.spec.template.spec.containers[0].image = "ghcr.io/techtorque-2025/api_gateway:${{ steps.get_sha.outputs.sha }}"' config-repo/k8s/services/gateway-deployment.yaml
 
-      # Applies the updated file to your cluster
+      # 3. Deploy the updated file
       - name: Deploy to Kubernetes
         run: |
-          kubectl apply -f Kubernetes/services/gateway-deployment.yaml
-          
-          # Waits for the new version to be fully rolled out
+          kubectl apply -f config-repo/k8s/services/gateway-deployment.yaml
           kubectl rollout status deployment/api-gateway-deployment
