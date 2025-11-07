@@ -4,7 +4,6 @@ name: Deploy Gateway to Kubernetes
 
 on:
   workflow_run:
-    # This MUST match the 'name:' of your build.yml file
     workflows: ["Build, Test, and Package Gateway"]
     types:
       - completed
@@ -24,16 +23,15 @@ jobs:
         run: |
           echo "sha=$(echo ${{ github.event.workflow_run.head_sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
 
-      # 1. Checkout your new 'k8s-config' repository
       - name: Checkout K8s Config Repo
         uses: actions/checkout@v4
         with:
-          # This points to your new repo
           repository: 'TechTorque-2025/k8s-config' 
-          # This uses the org-level secret you created
           token: ${{ secrets.REPO_ACCESS_TOKEN }} 
-          # We'll put the code in a directory named 'config-repo'
-          path: 'config-repo' 
+          path: 'config-repo'
+          # --- NEW LINE ---
+          # Explicitly checkout the 'main' branch
+          ref: 'main' 
 
       - name: Install kubectl
         uses: azure/setup-kubectl@v3
@@ -46,14 +44,19 @@ jobs:
       - name: Set Kubernetes context
         uses: azure/k8s-set-context@v4
         with:
-          kubeconfig: ${{ secrets.KUBE_CONFIG_DATA }} # This uses your Org-level secret
+          kubeconfig: ${{ secrets.KUBE_CONFIG_DATA }} 
 
-      # 2. Update the image tag in the checked-out config repo
       - name: Update image tag in YAML
         run: |
           yq -i '.spec.template.spec.containers[0].image = "ghcr.io/techtorque-2025/api_gateway:${{ steps.get_sha.outputs.sha }}"' config-repo/k8s/services/gateway-deployment.yaml
 
-      # 3. Deploy the updated file
+      # --- NEW DEBUGGING STEP ---
+      - name: Display file contents before apply
+        run: |
+          echo "--- Displaying k8s/services/gateway-deployment.yaml ---"
+          cat config-repo/k8s/services/gateway-deployment.yaml
+          echo "------------------------------------------------------"
+          
       - name: Deploy to Kubernetes
         run: |
           kubectl apply -f config-repo/k8s/services/gateway-deployment.yaml
