@@ -34,4 +34,7 @@ Thumbs.db
 # JetBrains
 workspace.xml
 
+# Build Artefacts
+bin/
+
 # Keep go.mod and source files tracked (do not ignore go.mod/go.sum)
