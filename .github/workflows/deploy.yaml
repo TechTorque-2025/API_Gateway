@@ -48,7 +48,7 @@ jobs:
 
       - name: Update image tag in YAML
         run: |
-          yq -i '.spec.template.spec.containers[0].image = "ghcr.io/techtorque-2025/api_gateway:${{ steps.get_sha.outputs.sha }}"' config-repo/k8s/services/gateway-deployment.yaml
+          yq -i '(select(.kind == "Deployment") | .spec.template.spec.containers[0].image) = "ghcr.io/techtorque-2025/api_gateway:${{ steps.get_sha.outputs.sha }}"' config-repo/k8s/services/gateway-deployment.yaml
 
       # --- NEW DEBUGGING STEP ---
       - name: Display file contents before apply
