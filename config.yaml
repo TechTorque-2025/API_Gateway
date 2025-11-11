@@ -45,6 +45,13 @@ services:
     auth_required: true
     # env_var not specified - will auto-generate: APPOINTMENTS_SERVICE_URL
 
+  # Service Types (also handled by Appointment Service)
+  - name: "service-types"
+    path_prefix: "/api/v1/service-types"
+    target_url: "http://localhost:8083"
+    strip_prefix: "/api/v1"
+    auth_required: true
+
   # --- Service & Project Management Service (Port 8084) ---
   - name: "services"
     path_prefix: "/api/v1/services"
