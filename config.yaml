@@ -115,6 +115,7 @@ services:
 
   - name: "ai"
     path_prefix: "/api/v1/ai/"
-    target_url: "http://localhost:8089" # Assuming a future port for the FastAPI service
-    strip_prefix: "/api/v1/ai"
+    target_url: "http://localhost:8091" # Agent Bot service (Python FastAPI)
+    strip_prefix: "" # Don't strip - Agent Bot expects the full path
     auth_required: true
+    env_var: "AGENT_BOT_SERVICE_URL"
