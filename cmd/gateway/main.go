@@ -98,8 +98,21 @@ func newProxy(targetURL, stripPrefix string) (*httputil.ReverseProxy, error) {
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	originalDirector := proxy.Director
 	proxy.Director = func(req *http.Request) {
+		// Store the custom headers before calling originalDirector
+		userSubject := req.Header.Get("X-User-Subject")
+		userRoles := req.Header.Get("X-User-Roles")
+
 		originalDirector(req)
 		req.Host = target.Host
+
+		// Re-apply custom headers after originalDirector (which may create a new header map)
+		if userSubject != "" {
+			req.Header.Set("X-User-Subject", userSubject)
+		}
+		if userRoles != "" {
+			req.Header.Set("X-User-Roles", userRoles)
+		}
+
 		if stripPrefix != "" {
 			req.URL.Path = strings.TrimPrefix(req.URL.Path, stripPrefix)
 		}
@@ -182,6 +195,8 @@ func injectUserInfo(next http.Handler) http.Handler {
 			}
 			logger.Info("Injecting user info into headers", "subject", r.Header.Get("X-User-Subject"), "roles", r.Header.Get("X-User-Roles"))
 		}
+		// NOTE: The Authorization header is already present in r.Header and will be
+		// automatically forwarded by the reverse proxy to downstream services
 		next.ServeHTTP(w, r)
 	})
 }
@@ -210,6 +225,7 @@ func main() {
 			"http://localhost:3000",
 			"http://127.0.0.1:3000",
 			"https://techtorque.vercel.app",
+			"https://techtorque.randitha.net",
 		},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
