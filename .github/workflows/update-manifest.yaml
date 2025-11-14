@@ -45,13 +45,14 @@ jobs:
         run: |
           cd k8s-config
           NEW_IMAGE="ghcr.io/techtorque-2025/${SERVICE_NAME}:${{ steps.info.outputs.branch }}-${{ steps.info.outputs.sha }}"
-          
+          export NEW_IMAGE
+
           echo "🔄 Updating ${DEPLOYMENT_FILE} to use image: ${NEW_IMAGE}"
-          
+
           yq eval -i \
             '(select(.kind == "Deployment") | .spec.template.spec.containers[0].image) = env(NEW_IMAGE)' \
             k8s/services/${DEPLOYMENT_FILE}
-          
+
           echo "✅ Updated manifest:"
           yq eval 'select(.kind == "Deployment") | .spec.template.spec.containers[0].image' k8s/services/${DEPLOYMENT_FILE}
       
