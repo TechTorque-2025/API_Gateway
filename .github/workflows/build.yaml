@@ -1,95 +1,110 @@
-# API_Gateway/.github/workflows/build.yml
-# This workflow builds, tests, AND packages the Go API Gateway
+# Updated build.yaml template for microservices
+# This replaces the old build.yaml to add branch-aware image tagging
 
-name: Build, Test, and Package Gateway
+name: Build and Package Service
 
 on:
   push:
     branches:
       - 'main'
-      - 'devOps'
       - 'dev'
   pull_request:
     branches:
       - 'main'
-      - 'devOps'
       - 'dev'
 
 permissions:
   contents: read
-  packages: write 
+  packages: write
 
 jobs:
-  # --- JOB 1: Build and Test (From your file) ---
-  # This runs on all pushes AND all pull requests to verify the code
-  build-and-test:
-    name: Build and Smoke Test
+  # JOB 1: Build and test (runs on all pushes and PRs)
+  build-test:
+    name: Build and Test
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      # For Java/Spring Boot services:
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
         with:
-          go-version: '1.22'
-          cache-dependency-path: go.mod
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
 
-      - name: Download dependencies
-        run: go mod download
+      - name: Cache Maven packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-
 
-      - name: Build Go Application
-        run: go build -v -o ./app ./cmd/gateway
+      - name: Build with Maven
+        run: mvn -B clean package -DskipTests --file gateway/pom.xml
 
-      - name: Verify config.yaml exists
-        run: |
-          if [ ! -f config.yaml ]; then
-            echo "Error: config.yaml not found!"
-            exit 1
-          fi
-          echo "✓ config.yaml found"
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: service-jar
+          path: gateway/target/*.jar
 
-      - name: Start Gateway (smoke test)
-        run: |
-          echo "Starting API Gateway with config.yaml..."
-          # We need to set a dummy secret for the smoke test
-          export JWT_SECRET="dummy-secret-for-test"
-          timeout 5s ./app || code=$?
-          if [ ${code:-0} -eq 124 ]; then
-            echo "✓ Gateway started successfully (terminated after 5s)"
-            exit 0
-          elif [ ${code:-0} -eq 0 ]; then
-            echo "✓ Gateway started and stopped cleanly"
-            exit 0
-          else
-            echo "✗ Gateway failed to start (exit code: ${code})"
-            exit 1
-          fi
+      # For Node.js/Next.js services (Frontend):
+      # - name: Use Node.js and cache npm
+      #   uses: actions/setup-node@v4
+      #   with:
+      #     node-version: '22'
+      #     cache: 'npm'
+      #
+      # - name: Install dependencies
+      #   run: npm ci
+      #
+      # - name: Run linter
+      #   run: npm run lint
+      #
+      # - name: Build
+      #   run: npm run build
 
-  # --- JOB 2: Package as Docker Image (From my file) ---
-  # This runs ONLY after Job 1 succeeds, AND
-  # This runs ONLY on pushes to your main branches (not PRs)
+  # JOB 2: Package as Docker image (only on pushes to main/dev, not PRs)
   build-and-push-docker:
     name: Build & Push Docker Image
-    needs: build-and-test # Depends on the first job
-    
-    # This logic ensures it only runs on pushes, not PRs
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/devOps' || github.ref == 'refs/heads/dev')
+    needs: build-test
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
     runs-on: ubuntu-latest
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        
+      # For Java services: download JAR from previous job
+      - name: Download JAR Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: service-jar
+          path: gateway/target/
 
-      - name: Docker meta
+      - name: Extract branch name
+        id: branch
+        run: |
+          BRANCH_NAME=${GITHUB_REF#refs/heads/}
+          echo "name=${BRANCH_NAME}" >> $GITHUB_OUTPUT
+          echo "📍 Building for branch: ${BRANCH_NAME}"
+
+      - name: Docker meta (with branch-aware tags)
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository }} 
+          images: ghcr.io/techtorque-2025/api_gateway
           tags: |
-            type=sha,prefix=
-            type:raw,value=latest,enable={{is_default_branch}}
+            # Branch + short SHA (e.g., dev-abc1234 or main-xyz5678)
+            type=raw,value=${{ steps.branch.outputs.name }}-{{sha}},enable=true
+            # Latest tag only for main branch
+            type=raw,value=latest,enable={{is_default_branch}}
+          flavor: |
+            latest=false
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -102,7 +117,20 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+      
+      - name: Image Summary
+        run: |
+          echo "### 🐳 Docker Image Built" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Tags pushed:**" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+# REPLACEMENTS NEEDED:
+# - gateway: e.g., "auth-service", "time-logging-service" (for Java services)
+# - api_gateway: e.g., "authentication", "timelogging_service", "frontend_web"
+# - Uncomment Node.js steps for Frontend_Web
