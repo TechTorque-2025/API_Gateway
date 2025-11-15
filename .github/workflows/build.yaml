@@ -1,14 +1,7 @@
-# Updated build.yaml template for microservices
-# This replaces the old build.yaml to add branch-aware image tagging
-
-name: Build and Package Service
+name: Build and Push Docker Image
 
 on:
   push:
-    branches:
-      - 'main'
-      - 'dev'
-  pull_request:
     branches:
       - 'main'
       - 'dev'
@@ -18,73 +11,13 @@ permissions:
   packages: write
 
 jobs:
-  # JOB 1: Build and test (runs on all pushes and PRs)
-  build-test:
-    name: Build and Test
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      # For Java/Spring Boot services:
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-          cache: maven
-
-      - name: Cache Maven packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.m2/repository
-          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
-          restore-keys: |
-            ${{ runner.os }}-maven-
-
-      - name: Build with Maven
-        run: mvn -B clean package -DskipTests --file gateway/pom.xml
-
-      - name: Upload Build Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: service-jar
-          path: gateway/target/*.jar
-
-      # For Node.js/Next.js services (Frontend):
-      # - name: Use Node.js and cache npm
-      #   uses: actions/setup-node@v4
-      #   with:
-      #     node-version: '22'
-      #     cache: 'npm'
-      #
-      # - name: Install dependencies
-      #   run: npm ci
-      #
-      # - name: Run linter
-      #   run: npm run lint
-      #
-      # - name: Build
-      #   run: npm run build
-
-  # JOB 2: Package as Docker image (only on pushes to main/dev, not PRs)
-  build-and-push-docker:
+  build-and-push:
     name: Build & Push Docker Image
-    needs: build-test
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        
-      # For Java services: download JAR from previous job
-      - name: Download JAR Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: service-jar
-          path: gateway/target/
 
       - name: Extract branch name
         id: branch
@@ -99,9 +32,7 @@ jobs:
         with:
           images: ghcr.io/techtorque-2025/api_gateway
           tags: |
-            # Branch + short SHA (e.g., dev-abc1234 or main-xyz5678)
             type=raw,value=${{ steps.branch.outputs.name }}-{{sha}},enable=true
-            # Latest tag only for main branch
             type=raw,value=latest,enable={{is_default_branch}}
           flavor: |
             latest=false
@@ -120,7 +51,7 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-      
+
       - name: Image Summary
         run: |
           echo "### 🐳 Docker Image Built" >> $GITHUB_STEP_SUMMARY
@@ -129,8 +60,3 @@ jobs:
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo "${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-
-# REPLACEMENTS NEEDED:
-# - gateway: e.g., "auth-service", "time-logging-service" (for Java services)
-# - api_gateway: e.g., "authentication", "timelogging_service", "frontend_web"
-# - Uncomment Node.js steps for Frontend_Web

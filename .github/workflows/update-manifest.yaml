@@ -5,7 +5,7 @@ name: Update K8s Manifest
 
 on:
   workflow_run:
-    workflows: ["Build and Package Service"]  # Or "Build, Test, and Package Frontend" for Frontend_Web
+    workflows: ["Build and Push Docker Image"]
     types: [completed]
     branches: ['main', 'dev']
 
