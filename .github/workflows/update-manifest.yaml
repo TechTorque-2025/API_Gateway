@@ -1,0 +1,89 @@
+# GitHub Actions Workflow Template for GitOps with ArgoCD
+# This workflow should replace the old deploy.yaml in each microservice repo
+
+name: Update K8s Manifest
+
+on:
+  workflow_run:
+    workflows: ["Build and Push Docker Image"]
+    types: [completed]
+    branches: ['main', 'dev']
+
+jobs:
+  update-manifest:
+    name: Update Image Tag in k8s-config
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Get branch and SHA info
+        id: info
+        run: |
+          BRANCH="${{ github.event.workflow_run.head_branch }}"
+          SHORT_SHA="$(echo ${{ github.event.workflow_run.head_sha }} | cut -c1-7)"
+          echo "branch=${BRANCH}" >> $GITHUB_OUTPUT
+          echo "sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "📍 Branch: ${BRANCH}, SHA: ${SHORT_SHA}"
+      
+      - name: Checkout k8s-config repo (matching branch)
+        uses: actions/checkout@v4
+        with:
+          repository: 'TechTorque-2025/k8s-config'
+          token: ${{ secrets.REPO_ACCESS_TOKEN }}
+          ref: ${{ steps.info.outputs.branch }}  # Checkout dev or main to match microservice branch
+          path: 'k8s-config'
+      
+      - name: Install yq (YAML processor)
+        run: |
+          sudo wget -qO /usr/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/bin/yq
+      
+      - name: Update image tag in deployment manifest
+        env:
+          SERVICE_NAME: "api_gateway"  # e.g., "timelogging_service", "frontend_web", "authentication"
+          DEPLOYMENT_FILE: "gateway-deployment.yaml"  # e.g., "timelogging-deployment.yaml", "frontend-deployment.yaml"
+        run: |
+          cd k8s-config
+          NEW_IMAGE="ghcr.io/techtorque-2025/${SERVICE_NAME}:${{ steps.info.outputs.branch }}-${{ steps.info.outputs.sha }}"
+          export NEW_IMAGE
+
+          echo "🔄 Updating ${DEPLOYMENT_FILE} to use image: ${NEW_IMAGE}"
+
+          yq eval -i \
+            '(select(.kind == "Deployment") | .spec.template.spec.containers[0].image) = env(NEW_IMAGE)' \
+            k8s/services/${DEPLOYMENT_FILE}
+
+          echo "✅ Updated manifest:"
+          yq eval 'select(.kind == "Deployment") | .spec.template.spec.containers[0].image' k8s/services/${DEPLOYMENT_FILE}
+      
+      - name: Commit and push changes
+        env:
+          SERVICE_NAME: "api_gateway"
+        run: |
+          cd k8s-config
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          git add k8s/services/
+          
+          if git diff --cached --quiet; then
+            echo "⚠️  No changes detected, skipping commit"
+            exit 0
+          fi
+          
+          git commit -m "chore(${SERVICE_NAME}): update image to ${{ steps.info.outputs.branch }}-${{ steps.info.outputs.sha }}" \
+                     -m "Triggered by: ${{ github.event.workflow_run.html_url }}"
+          
+          git push origin ${{ steps.info.outputs.branch }}
+          
+          echo "✅ Pushed manifest update to k8s-config/${{ steps.info.outputs.branch }}"
+          echo "🚀 ArgoCD will automatically deploy this change"
+      
+      - name: Summary
+        run: |
+          echo "### 🎉 Manifest Update Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: ${{ steps.info.outputs.branch }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image Tag**: ${{ steps.info.outputs.branch }}-${{ steps.info.outputs.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Manifest Updated**: k8s/services/gateway-deployment.yaml" >> $GITHUB_STEP_SUMMARY
+          echo "- **Next Step**: ArgoCD will sync this change to the cluster" >> $GITHUB_STEP_SUMMARY
