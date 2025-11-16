@@ -36,6 +36,7 @@ services:
     target_url: "http://localhost:8083"
     strip_prefix: "/api/v1"
     auth_required: false # Public endpoint
+    env_var: "APPOINTMENTS_SERVICE_URL"
     
   # Protected appointment endpoints
   - name: "appointments"
@@ -51,6 +52,7 @@ services:
     target_url: "http://localhost:8083"
     strip_prefix: "/api/v1"
     auth_required: true
+    env_var: "APPOINTMENTS_SERVICE_URL"
 
   # --- Service & Project Management Service (Port 8084) ---
   - name: "services"
